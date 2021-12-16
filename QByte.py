@@ -1,5 +1,4 @@
-# This import registers the 3D projection, but is otherwise unused.
-from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 unused import
+from mpl_toolkits.mplot3d import Axes3D  # required import for some machines to render 3d projection
 import matplotlib.pyplot as plt
 import numpy as np
 import matplotlib.animation as animation
@@ -17,6 +16,7 @@ import tkinter as tk
 from astral import LocationInfo
 import datetime
 from astral.sun import sunrise,sunset
+from urllib.request import urlopen as uReq
 warnings.simplefilter('ignore')
 
 
@@ -28,14 +28,25 @@ DotSize = 4444
 wordsize = 36
 
 NEDspeed = 250#Number of bytes to stream from the RNG each second
-UseTrueRNG = True#Set to 'False' if you do not have TrueRNG hardware set up. This will run the program using pseudo-random data.
-HALO = True#Set to 'True' only if you have 4 or more TrueRNGs
-TurboUse = False#Set to 'True' only if you have a TurboRNG
+RandomSrc = 'ipfs'#'trng' = TrueRNG hardware ... 'prng' = pseudo RNG (REQUIRED TurboUse=False) ... 'ipfs' = interplenetary file system (REQUIRED config for ipfs mode -> NEDspeed=250, HALO=True, SupHALO=True, TurboUse=True. RNG hardware is NOT required as it will pull the data remotely.)
+SupHALO = True#Set to 'True' for full (8 bitstream) QByte processing. Not reccomended for slower computers.
+TurboUse = True#Set to 'True' only if you have a TurboRNG
+#trouble may occur if using Turbo without NEDs
 
 autofreq = 600#how often to switch view in seconds if ran in 'auto' mode
 
-mType = sys.argv[1]#static,auto,nye
-Rmks = sys.argv[2]#remarks
+# check if optional args are provided, assign to None if not provided
+try:
+    mType = sys.argv[1]#static,auto,nye
+except:
+    # define a default other than "None" in try/except statement below?
+    mType = "auto"
+
+try:
+    Rmks = sys.argv[2]#remarks
+except:
+    # define a default other than "None"?
+    Rmks = "remarks"
 
 ###########
 
@@ -43,14 +54,22 @@ outpath = os.getcwd()
 
 TurboSpeed = NEDspeed
 
+if RandomSrc=='prng':
+    HALO = False
+else:
+    HALO = True
+
 
 starttime = int(time.time()*1000)
 outfile = open('%s/QB_%d_%s.txt'%(outpath,int(starttime/1000),Rmks),'w')
 cmtfile = open('%s/QB_%d_%s_C.txt'%(outpath,int(starttime/1000),Rmks),'w')
 
-outfile.write('ColorZ: %f RotZ: %f RNG params: %s %s %s\n'%(ColorZ,RotZ,UseTrueRNG,HALO,TurboUse))
+outfile.write('ColorZ: %f RotZ: %f RNG params: %s %s %s\n'%(ColorZ,RotZ,RandomSrc,HALO,TurboUse))
 
-
+if SupHALO==True:
+    NumNeds = 8
+else:
+    NumNeds = 4
 
 DayStarted = starttime - (starttime%86400000)
 StartXT = (starttime-DayStarted)/3600000
@@ -83,6 +102,62 @@ for a in range (0,60):
 
 ####
 
+IpfsIdx = [0]
+MetaIdx = [0]
+
+def NewIPFS():
+
+    #data = 'https://bafybeifp5ssrdqiwtpgmci6s366ay35pmm4gqq5qp52ue5f35xigiszktu.ipfs.dweb.link/NEDpredata_0.txt'
+    data = 'https://bafybeievaadn5wv7xlxdto5m7nqn34q7nzdk5x4fpdh4sogrx4xkdg5ad4.ipfs.dweb.link/short/NEDpredata_%d.txt'%IpfsIdx[0]
+    
+    print('pulling data from %s'%data)
+    
+    uClient = uReq(data)
+    page_html = str(uClient.read())
+    uClient.close()
+    sepfile = page_html.split('\\n')
+    
+    
+    MetaXX=[]
+    for a in range (0,len(sepfile)-1):
+        if a==0:
+            xandy = sepfile[a][2:].split(',')
+        else:
+            xandy = sepfile[a].split(',')
+            
+        uNed=[]
+        for b in range (0,len(xandy)-2):
+            uNed.append(int(xandy[b]))
+        
+        #if len(uNed)<250:
+        #    print(a)
+            
+        #MetaLen.append(len(uNed))
+        MetaXX.append(uNed)
+        
+    IpfsIdx[0] += 1
+
+    return MetaXX
+
+if RandomSrc=='ipfs':
+    
+    MetaNED = NewIPFS()
+    
+
+def GrabIPFS():
+    if MetaIdx[0]>=len(MetaNED):
+        xNED = NewIPFS()
+        for a in range (0,len(xNED)):
+            MetaNED[a] = xNED[a]
+            
+        MetaIdx[0] = 0
+    
+    grabbed = MetaNED[MetaIdx[0]]
+    MetaIdx[0] += 1
+    return grabbed
+    
+####
+
 
 plt.style.use('dark_background')
 #plt.grid([False])
@@ -100,7 +175,7 @@ riprise=[]
 ripset=[]
 
 zoomsto = [1]
-viewsto = [0]
+viewsto = [3]
 viewlong = [0]
 
 for a in range (0,10):
@@ -114,6 +189,9 @@ alltypes = ['hypercube','sphere','pyramid','AEM','quad']
     
 def MkShape(shp):
     if shp == 'hypercube':
+        
+        WM_ll = 1.4
+        WM_ul = 4.1
         
         #infile = 'SimulationsHC.txt'
     
@@ -131,6 +209,9 @@ def MkShape(shp):
                 sNode.append([int(xandy[0])-4,int(xandy[1])-4,int(xandy[2])-4])
                 
     if shp == 'sphere' or shp == 'nye':
+        
+        WM_ll = 1.4
+        WM_ul = 1.42
             
         #infile = 'Simulations_Sphere12.txt'
         ShapeC = []
@@ -181,6 +262,10 @@ def MkShape(shp):
     
     
     if shp == 'pyramid':
+        
+        WM_ll = 0.7
+        WM_ul = 2.1      
+        
         #infile = 'SimulationsHC.txt'#temp
         ShapeC = []
         x = [1,2,3,4,5,0.5,0.5,0.5,0.5,0.5,1,2,3,4,5,5.5,5.5,5.5,5.5,5.5,2,3,4,1.5,1.5,1.5,2,3,4,4.5,4.5,4.5,2.5,3.5,3,3]
@@ -209,6 +294,10 @@ def MkShape(shp):
                 sNode.append(ShapeC[a])
     
     if shp=='AEM':
+        
+        WM_ll = 0.6
+        WM_ul = 0.64    
+        
         #infile = 'Simulations_AEM10.txt'
         ShapeC = []
         for a in range (0,10):
@@ -218,6 +307,10 @@ def MkShape(shp):
         Node = [1,1,1,1,1,1,1,1,1,1]
         
     if shp=='quad':
+        
+        WM_ll = 1.4
+        WM_ul = 2.1  
+        
         #infile = 'Simulations_AEM10.txt'#temporary!
         ShapeC = [[2,1,0],[2,5,0],[4,1,0],[4,5,0],[1,2,0],[1,4,0],[5,2,0],[5,4,0]]
         sNode = ShapeC
@@ -226,7 +319,7 @@ def MkShape(shp):
     infile = 'sim_%s'%shp
 
     SimMI = []    
-    readFile = open('%s\%s.txt'%(outpath,infile),'r')
+    readFile = open('%s/%s.txt'%(outpath,infile),'r')
     sepfile = readFile.read().split('\n')
     for a in range (0,len(sepfile)-1):
         SimMI.append(float(sepfile[a]))
@@ -249,7 +342,7 @@ def MkShape(shp):
             
             for b in range (0,len(sNode)):
                 dd = (((ShapeC[a][0]-sNode[b][0])**2)+((ShapeC[a][1]-sNode[b][1])**2)+((ShapeC[a][2]-sNode[b][2])**2))**0.5
-                if 1.4<=dd<=4.1:#sqrt of 2 to 4 but within tolerance to allow floating point errors
+                if WM_ll<=dd<=WM_ul:#sqrt of 2 to 4 but within tolerance to allow floating point errors
                     WM[ShapeCt,b] = 1
                     Kct += 1
             ShapeCt += 1
@@ -287,7 +380,7 @@ def zoom(self):
 
 def autoview():
     tmp = viewsto[0]
-    if tmp==4:
+    if tmp==(len(alltypes)-1):
         viewsto[0] = 0
     else:
         viewsto[0] += 1
@@ -340,35 +433,35 @@ for line in range(0,len(Lines)):
     AllLO.append(Lines[line])
 
 
-if UseTrueRNG==True:
+if RandomSrc=='trng':
 
-    
-    
+
+
     ports=dict()  
     ports_avaiable = list(list_ports.comports())
-    
-    
+
+
     rngcomports = []
     turbocom = None
-    
+
     for temp in ports_avaiable:
         if HALO==True:
-        	if temp[1].startswith("TrueRNG"):
-        		if 'pro' in temp[1]:
-        			print ('found pro')
-        			turbocom = str(temp[0])
-        		else:
-        			print('Found:           ' + str(temp))
-        			rngcomports.append(str(temp[0]))
+            if temp[1].startswith("TrueRNG"):
+                if 'pro' in temp[1]:
+                    print ('found pro')
+                    turbocom = str(temp[0])
+                else:
+                    print('Found:           ' + str(temp))
+                    rngcomports.append(str(temp[0]))
         else:
-        	if temp[1].startswith("TrueRNG"):
-        		print ('found device')
-        		turbocom = str(temp[0])
-            
+            if temp[1].startswith("TrueRNG"):
+                print ('found device')
+                turbocom = str(temp[0])
+
     if HALO==True:
         ser = []            
         for a in range(0,len(rngcomports)):
-        	ser.append (serial.Serial(port=rngcomports[a],timeout=10))    
+            ser.append (serial.Serial(port=rngcomports[a],timeout=10))
     if TurboUse==True:
         turboser= (serial.Serial(port=turbocom,timeout=10)) 
     
@@ -381,12 +474,12 @@ if UseTrueRNG==True:
     
     if HALO==True:
         for a in range(0,len(rngcomports)):
-        	if(ser[a].isOpen() == False):
-        		ser[a].open()
-        
-        	ser[a].setDTR(True)
-        	ser[a].flushInput()
-    if TurboUse==True:
+            if(ser[a].isOpen() == False):
+                ser[a].open()
+            ser[a].setDTR(True)
+            ser[a].flushInput()
+
+if TurboUse==True:
         if turboser.isOpen()==False:
             turboser.open()
         turboser.setDTR(True)
@@ -419,18 +512,26 @@ def Bulk():
     
     pct = []
     allsums=[]
-    for a in range (0,5):
+    
+
+    
+    for a in range (0,9):
         pct.append([])
         
     if TurboUse==True:
     
-        turboser.flushInput()
-        supernode = turboser.read(TurboSpeed)#CHG
+        if RandomSrc=='trng':
+            turboser.flushInput()
+            supernode = turboser.read(TurboSpeed)#CHG
+        if RandomSrc=='ipfs':
+            supernode = GrabIPFS()
+        if RandomSrc=='prng':
+            print("CONFIG ERROR: cannot use mode prng with TurboUse=True")
             
         tempsum = 0
         for b in range (0,len(supernode)):
             outfile.write('%d,'%(supernode[b]))
-            pct[4].append(supernode[b])
+            pct[8].append(supernode[b])
             
             
             #allnodes.append(supernode[b])
@@ -440,18 +541,20 @@ def Bulk():
         
         allsums.append(tempsum)
         
-    for a in range(0,4):
-        if (HALO==True or TurboUse==False) and UseTrueRNG==True:
+    for a in range(0,NumNeds):
+        if (HALO==True or TurboUse==False) and RandomSrc=='trng':
             try:
                 ser[a%len(ser)].flushInput()
                 node = ser[a%len(ser)].read(NEDspeed)
             except:
                 node = []
         else:
-            if UseTrueRNG==True:
+            if RandomSrc=='trng':
                 node = turboser.read(NEDspeed)
-            else:
+            if RandomSrc=='prng':
                 node = np.random.randint(0,256,NEDspeed)
+            if RandomSrc=='ipfs':
+                node = GrabIPFS()
         #print (a,len(node),TotalRuns)
         while len(node)==0:
             print('BAD READ ON %s ... removing'%rngcomports[a%len(ser)])
@@ -480,24 +583,28 @@ def Bulk():
     Pur1 = pct[1]
     Pur2 = pct[2]
     Pur3 = pct[3]
-    #Pur4 = pct[4]
-    #Pur5 = pct[5]
-    #Pur6 = pct[6]
-    #Pur7 = pct[7]
+    Pur4 = pct[4]
+    Pur5 = pct[5]
+    Pur6 = pct[6]
+    Pur7 = pct[7]
     if TurboUse==True:
-        PurT = pct[4]
+        PurT = pct[8]
     
     
     for b in range (0,len(Pur0)):
-        #xA = Pur0[b]^Pur7[b]
-        #xB = Pur1[b]^Pur6[b]
-        #xC = Pur2[b]^Pur5[b]
-        #xD = Pur3[b]^Pur4[b]
         
+        if SupHALO==True:
+            xA = Pur0[b]^Pur7[b]
+            xB = Pur1[b]^Pur6[b]
+            xC = Pur2[b]^Pur5[b]
+            xD = Pur3[b]^Pur4[b]
         
+            xE = xA^xD
+            xF = xB^xC
+        else:
         
-        xE = Pur0[b]^Pur3[b]#xA^xD
-        xF = Pur1[b]^Pur2[b]#xB^xC
+            xE = Pur0[b]^Pur3[b]
+            xF = Pur1[b]^Pur2[b]
         
         xG = xE^xF
         
@@ -535,7 +642,7 @@ def Bulk():
     str0 = str(bin(256+int(x[-2])))[3:] + str(bin(256+int(x[-1])))[3:]
     ones = int(str0[0])+int(str0[1])+int(str0[2])+int(str0[3])+int(str0[4])+int(str0[5])+int(str0[6])+int(str0[7])+int(str0[8])+int(str0[9])+int(str0[10])+int(str0[11])+int(str0[12])+int(str0[13])+int(str0[14])+int(str0[15])
 
-    cat = np.random.randint(0,3)
+    #cat = np.random.randint(0,3)
     
     uidx = -3
     sector = -9999
@@ -681,9 +788,9 @@ def Drop(typidx):
             
 def SnapInt(typidx):
     for a in range (0,len(mShapeC[typidx])):
-        mShapeC[typidx][a][0] = np.rint(mShapeC[typidx][a][0])
-        mShapeC[typidx][a][1] = np.rint(mShapeC[typidx][a][1])
-        mShapeC[typidx][a][2] = np.rint(mShapeC[typidx][a][2])
+        mShapeC[typidx][a][0] = int(np.rint(mShapeC[typidx][a][0]))
+        mShapeC[typidx][a][1] = int(np.rint(mShapeC[typidx][a][1]))
+        mShapeC[typidx][a][2] = int(np.rint(mShapeC[typidx][a][2]))
 
 
 
@@ -700,7 +807,7 @@ ax1y=[]
 ax1s=[]
 ax1sN=[]  
 axQB=[]  
-for a in range (0,5):
+for a in range (0,NumNeds+1):
     Xsums.append([])
     ax1y.append([])
 
@@ -1029,5 +1136,3 @@ def animate(i):
 ani = animation.FuncAnimation(fig, animate, interval=1000)
 
 plt.show()
-
-
